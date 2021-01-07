@@ -3,6 +3,8 @@ import 'package:camera/camera.dart';
 import 'dart:io';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:language_pickers/languages.dart';
+import 'package:language_pickers/language_pickers.dart';
 
 import 'DetailScreen.dart';
 
@@ -20,6 +22,32 @@ class CameraScreen extends StatefulWidget {
 
 class _CameraScreenState extends State<CameraScreen> {
   CameraController _controller;
+
+  Language _selectedLanguage = LanguagePickerUtils.getLanguageByIsoCode('en');
+
+  Widget _buildDialogItem(Language language) => Row(
+        children: <Widget>[
+          Text(language.name),
+          SizedBox(width: 8.0),
+          Flexible(child: Text("(${language.isoCode})"))
+        ],
+      );
+
+  void _openLanguagePickerDialog() => showDialog(
+        context: context,
+        builder: (context) => Theme(
+            data: Theme.of(context).copyWith(primaryColor: Colors.pink),
+            child: LanguagePickerDialog(
+                titlePadding: EdgeInsets.all(8.0),
+                searchCursorColor: Colors.blueAccent,
+                searchInputDecoration: InputDecoration(hintText: 'Search...'),
+                isSearchable: true,
+                title: Text('Select your language'),
+                onValuePicked: (Language language) => setState(() {
+                      _selectedLanguage = language;
+                    }),
+                itemBuilder: _buildDialogItem)),
+      );
 
   Future<String> _takePicture() async {
     // Checking whether the controller is initialized
@@ -88,7 +116,13 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('ML Vision'),
+        title: Text('TranslateMate'),
+        actions: [
+          FlatButton.icon(
+              onPressed: _openLanguagePickerDialog,
+              icon: Icon(Icons.compare_arrows, color: Colors.white),
+              label: Text(_selectedLanguage.isoCode.toUpperCase(), style: TextStyle(color: Colors.white)))
+        ],
       ),
       body: _controller.value.isInitialized
           ? Stack(
@@ -100,7 +134,7 @@ class _CameraScreenState extends State<CameraScreen> {
                     alignment: Alignment.bottomCenter,
                     child: RaisedButton.icon(
                       icon: Icon(Icons.camera),
-                      label: Text("Click"),
+                      label: Text("Take Picture"),
                       onPressed: () async {
                         await _takePicture().then((String path) {
                           if (path != null) {
@@ -108,7 +142,8 @@ class _CameraScreenState extends State<CameraScreen> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => DetailScreen(path),
+                                builder: (context) =>
+                                    DetailScreen(path, _selectedLanguage),
                               ),
                             );
                           }

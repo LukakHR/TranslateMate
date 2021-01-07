@@ -25,6 +25,8 @@ dependencies:
   path_provider: ^1.6.24
   intl: ^0.16.1
   firebase_ml_vision: ^0.9.3+8
+  translator: ^0.1.5
+  language_pickers: ^0.2.0+1
   flutter:
     sdk: flutter
 
