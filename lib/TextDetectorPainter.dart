@@ -1,11 +1,13 @@
 import 'package:firebase_ml_vision/firebase_ml_vision.dart';
 import 'package:flutter/material.dart';
 
+// used for drawing boxes around the recognized text blocks
+
 class TextDetectorPainter extends CustomPainter {
-  TextDetectorPainter(this.absoluteImageSize, this.elements);
+  TextDetectorPainter(this.absoluteImageSize, this.visionText);
 
   final Size absoluteImageSize;
-  final List<TextElement> elements;
+  final VisionText visionText;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -23,16 +25,29 @@ class TextDetectorPainter extends CustomPainter {
 
     final Paint paint = Paint()
       ..style = PaintingStyle.stroke
-      ..color = Colors.red
       ..strokeWidth = 2.0;
 
-    for (TextElement element in elements) {
-      canvas.drawRect(scaleRect(element), paint);
+    // draws a rect for each element, line and block
+    for (TextBlock block in visionText.blocks) {
+      for (TextLine line in block.lines) {
+        for (TextElement element in line.elements) {
+          paint.color = Colors.green;
+          canvas.drawRect(scaleRect(element), paint);
+        }
+
+        paint.color = Colors.yellow;
+        canvas.drawRect(scaleRect(line), paint);
+      }
+
+      paint.color = Colors.red;
+      canvas.drawRect(scaleRect(block), paint);
     }
   }
 
+  // checks if the blocks should be repainted if changes have happened
   @override
   bool shouldRepaint(TextDetectorPainter oldDelegate) {
-    return true;
+    return oldDelegate.absoluteImageSize != absoluteImageSize ||
+        oldDelegate.visionText != visionText;
   }
 }

@@ -1,30 +1,67 @@
+import 'package:firebase_ml_vision/firebase_ml_vision.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'dart:io';
-import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:language_pickers/languages.dart';
 import 'package:language_pickers/language_pickers.dart';
+import 'package:translator/translator.dart';
 
-import 'DetailScreen.dart';
-
-// List of available cameras from main.dart
-List<CameraDescription> cameras = [];
+import 'ScannerUtils.dart';
+import 'TextDetectorPainter.dart';
 
 class CameraScreen extends StatefulWidget {
-  CameraScreen(_cameras) {
-    cameras = _cameras;
-  }
-
   @override
   _CameraScreenState createState() => _CameraScreenState();
 }
 
 class _CameraScreenState extends State<CameraScreen> {
-  CameraController _controller;
+  // prevents multiple fireabse requests going on at the same time
+  bool _isDetecting = false;
 
+  // keeps track of the translated text
+  String translatedText = '';
+
+  // keeps track of the selected language
   Language _selectedLanguage = LanguagePickerUtils.getLanguageByIsoCode('en');
 
+  // keeps track of the text recognition software return value
+  VisionText _textScanResults;
+
+  // gets the camera direction to be able to draw the boxes around elements properly
+  CameraLensDirection _direction = CameraLensDirection.back;
+
+  // controls the camera
+  CameraController _camera;
+
+  // translator from the translator plug in
+  final translator = GoogleTranslator();
+
+  // text recognizer used to recognize text in the cloud
+  final TextRecognizer _textRecognizer =
+      FirebaseVision.instance.cloudTextRecognizer();
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeCamera();
+  }
+
+  // calls the translate function for each recognized element of text
+  void getWords(VisionText scanResults) {
+    if (scanResults.text.length > 0) {
+      _translateText(scanResults.text, _selectedLanguage.isoCode);
+    }
+  }
+
+  // translates the given str to given lan
+  void _translateText(str, lan) async {
+    var translation = await translator.translate(str, to: lan);
+
+    this.setState(() {
+      translatedText = translation.text;
+    });
+  }
+
+  // used to draw the language picker elements
   Widget _buildDialogItem(Language language) => Row(
         children: <Widget>[
           Text(language.name),
@@ -33,6 +70,7 @@ class _CameraScreenState extends State<CameraScreen> {
         ],
       );
 
+  // opens the language picker
   void _openLanguagePickerDialog() => showDialog(
         context: context,
         builder: (context) => Theme(
@@ -49,67 +87,46 @@ class _CameraScreenState extends State<CameraScreen> {
                 itemBuilder: _buildDialogItem)),
       );
 
-  Future<String> _takePicture() async {
-    // Checking whether the controller is initialized
-    if (!_controller.value.isInitialized) {
-      print("Controller is not initialized");
-      return null;
-    }
+  // initializes the camera and sets up an image stream to be used to recognize text
+  void _initializeCamera() async {
+    final CameraDescription description =
+        await ScannerUtils.getCamera(_direction);
 
-    // Formatting Date and Time for image saving and retrieving
-    String dateTime = DateFormat.yMMMd()
-        .addPattern('-')
-        .add_Hms()
-        .format(DateTime.now())
-        .toString();
+    _camera = CameraController(
+      description,
+      ResolutionPreset.high,
+    );
 
-    String formattedDateTime = dateTime.replaceAll(' ', '');
-    print("Formatted: $formattedDateTime");
+    await _camera.initialize();
 
-    // Retrieving the path for saving an image
-    final Directory appDocDir = await getApplicationDocumentsDirectory();
-    final String visionDir = '${appDocDir.path}/Photos/Vision\ Images';
-    await Directory(visionDir).create(recursive: true);
-    final String imagePath = '$visionDir/image_$formattedDateTime.jpg';
+    _camera.startImageStream((CameraImage image) {
+      // checks if it's already detecting an image
+      if (_isDetecting) return;
 
-    // Checking whether the picture is being taken
-    // to prevent execution of the function again
-    // if previous execution has not ended
-    if (_controller.value.isTakingPicture) {
-      print("Processing is in progress...");
-      return null;
-    }
+      // signals that it has started processing an image
+      _isDetecting = true;
 
-    try {
-      // Captures the image and saves it to the
-      // provided path
-      await _controller.takePicture(imagePath);
-    } on CameraException catch (e) {
-      print("Camera Exception: $e");
-      return null;
-    }
-
-    // returns tha path to the image
-    return imagePath;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-
-    _controller = CameraController(cameras[0], ResolutionPreset.medium);
-    _controller.initialize().then((_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {});
+      // gets the image from the camera and detects the text with the _getDetectionMethod()
+      ScannerUtils.detect(
+        image: image,
+        detectInImage: _getDetectionMethod(),
+        imageRotation: description.sensorOrientation,
+      ).then(
+        (results) {
+          // sets the state with the received results
+          if (results != null) {
+            setState(() {
+              _textScanResults = results;
+            });
+          }
+        },
+      ).whenComplete(() => _isDetecting = false);
     });
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  // detection method for camera
+  Future<VisionText> Function(FirebaseVisionImage image) _getDetectionMethod() {
+    return _textRecognizer.processImage;
   }
 
   @override
@@ -118,48 +135,86 @@ class _CameraScreenState extends State<CameraScreen> {
       appBar: AppBar(
         title: Text('TranslateMate'),
         actions: [
-          FlatButton.icon(
+          // button for opening the language picker interface
+          TextButton.icon(
               onPressed: _openLanguagePickerDialog,
               icon: Icon(Icons.compare_arrows, color: Colors.white),
-              label: Text(_selectedLanguage.isoCode.toUpperCase(), style: TextStyle(color: Colors.white)))
+              label: Text(_selectedLanguage.isoCode.toUpperCase(),
+                  style: TextStyle(color: Colors.white)))
         ],
       ),
-      body: _controller.value.isInitialized
-          ? Stack(
-              children: <Widget>[
-                CameraPreview(_controller),
-                Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Container(
-                    alignment: Alignment.bottomCenter,
-                    child: RaisedButton.icon(
-                      icon: Icon(Icons.camera),
-                      label: Text("Take Picture"),
-                      onPressed: () async {
-                        await _takePicture().then((String path) {
-                          if (path != null) {
-                            // opens detail screen when picture is taken
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    DetailScreen(path, _selectedLanguage),
-                              ),
-                            );
-                          }
-                        });
-                      },
-                    ),
-                  ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          // live camera view
+          _camera == null
+              ? Container(
+                  color: Colors.black,
                 )
-              ],
-            )
-          : Container(
-              color: Colors.black,
-              child: Center(
-                child: CircularProgressIndicator(),
-              ),
+              : Container(
+                  height: MediaQuery.of(context).size.height - 150,
+                  child: CameraPreview(_camera)),
+          // card for the translated text
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Card(
+              elevation: 8,
+              color: Colors.white,
+              child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Text(
+                          "Translated text",
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        height: 80,
+                        padding: EdgeInsets.only(bottom: 10),
+                        child: SingleChildScrollView(
+                          child: Text(
+                            translatedText,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )),
             ),
+          ),
+          // used for drawing boxes around the recognized text elements
+          _buildResults(_textScanResults),
+        ],
+      ),
     );
+  }
+
+  // draws boxes around recognized text elements
+  Widget _buildResults(VisionText scanResults) {
+    CustomPainter painter;
+    if (scanResults != null) {
+      final Size imageSize = Size(
+        _camera.value.previewSize.height - 100,
+        _camera.value.previewSize.width,
+      );
+      painter = TextDetectorPainter(imageSize, scanResults);
+
+      // calls the method for translating text
+      getWords(scanResults);
+
+      return CustomPaint(
+        painter: painter,
+      );
+    } else {
+      return Container();
+    }
   }
 }

@@ -6,6 +6,8 @@ import 'package:camera/camera.dart';
 import 'package:firebase_ml_vision/firebase_ml_vision.dart';
 import 'package:flutter/foundation.dart';
 
+// This is default code provided by the Flutter devs for handling the camera
+
 class ScannerUtils {
   ScannerUtils._();
 
